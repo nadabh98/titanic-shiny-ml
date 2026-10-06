@@ -1,0 +1,1700 @@
+---
+title: "Titanic_project"
+author: "nada"
+date: "2026-09-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# ============================================================
+# APPLICATION SHINY
+# PRÉDICTION DE SURVIE SUR LE TITANIC
+# ============================================================
+#
+# Objectif :
+# Comparer deux modèles de classification :
+#   1. Régression logistique
+#   2. Random Forest
+#
+# L'utilisateur peut modifier :
+#   - la classe du passager
+#   - le sexe
+#   - l'âge
+#   - le nombre de frères/sœurs/conjoints
+#   - le nombre de parents/enfants
+#
+# L'application affiche ensuite :
+#   - la prédiction de chaque modèle
+#   - la probabilité de survie
+#   - l'accuracy des deux modèles
+#   - les erreurs selon la classe du passager
+
+```{r}
+# Packages nécessaires
+library(shiny)
+library(bslib)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(titanic)
+library(randomForest)
+```
+
+
+```{r}
+# 1. Chargement des données
+titanic <- titanic_train
+
+# 2. Préparation des données
+titanic <- titanic %>%
+  mutate(
+    Age = ifelse(
+      is.na(Age),
+      median(Age, na.rm = TRUE),
+      Age
+    ),
+    Sex = as.factor(Sex),
+    Pclass = as.factor(Pclass),
+    Embarked = ifelse(
+      is.na(Embarked) | Embarked == "",
+      "S",
+      Embarked
+    ),
+    Embarked = as.factor(Embarked)
+  )
+```
+
+```{r}
+summary(titanic)
+
+colSums(is.na(titanic))
+```
+```{r}
+# 3. Sélection des variables pour le modèle
+
+titanic_model <- titanic %>%
+  select(Survived, Pclass, Sex, Age, SibSp, Parch)
+
+head(titanic_model)
+
+str(titanic_model)
+```
+
+```{r}
+#Transformer Survived en variable catégorielle
+titanic_model <- titanic_model %>%
+  mutate(
+    Survived = factor(
+      Survived,
+      levels = c(0, 1),
+      labels = c("Non", "Oui")
+    )
+  )
+
+table(titanic_model$Survived)
+```
+```{r}
+#Séparer les données en entraînement et test
+set.seed(123)
+#set.seed(123) fixe le point de départ du hasard.
+
+n <- nrow(titanic_model)
+#n = nombre de passagers
+#sample() choisit des éléments au hasard.
+train_index <- sample(
+  1:n,
+  size = 0.8 * n
+)
+
+train <- titanic_model[train_index, ]
+test <- titanic_model[-train_index, ]
+
+nrow(train)
+nrow(test)
+```
+
+# ============================================================
+# 2. MODÈLE DE RÉGRESSION LOGISTIQUE
+# ============================================================
+#
+# Le modèle cherche à prédire la variable Survived
+# à partir de :
+#
+#   Pclass : classe du passager
+#   Sex    : sexe
+#   Age    : âge
+#   SibSp  : frères/sœurs/conjoint
+#   Parch  : parents/enfants
+#
+
+
+```{r}
+#glm fait une régression logistique pour une variable binaire.
+modele <- glm(
+  Survived ~ Pclass + Sex + Age + SibSp + Parch,
+  data = train,
+  family = binomial
+)
+
+summary(modele)
+```
+# ============================================================
+# 2. MODÈLE DE RÉGRESSION LOGISTIQUE
+# ============================================================
+#
+# Le modèle cherche à prédire la variable Survived
+# à partir de :
+#
+#   Pclass : classe du passager
+#   Sex    : sexe
+#   Age    : âge
+#   SibSp  : frères/sœurs/conjoint
+#   Parch  : parents/enfants
+#
+
+```{r}
+
+#randomForest : le package qui contient l'algorithme Random Forest.
+set.seed(123)
+
+modele_rf <- randomForest(
+  Survived ~ Pclass + Sex + Age + SibSp + Parch,
+  data = train,
+  ntree = 500
+)
+
+modele_rf
+```
+le Random Forest est bien entraîné. 👍
+
+Il nous donne déjà une information intéressante :
+
+500 arbres
+erreur OOB = 17,98 %, donc environ 82,02 % d'accuracy OOB
+pour les survivants (Oui), le taux d'erreur OOB est d'environ 31,1 %
+pour les non-survivants (Non), il est d'environ 9,8 %
+
+Mais attention : on ne compare pas encore 82,02 % avec les 77,65 % de la régression logistique, car ce ne sont pas exactement les mêmes métriques : l'OOB est une estimation interne au Random Forest, alors que notre 77,65 % vient du jeu test.
+
+
+```{r}
+# Faire les prediction de la regression linéaire 
+# ============================================================
+# 4. TRANSFORMATION DES PROBABILITÉS EN PRÉDICTIONS
+# ============================================================
+#
+# Si la probabilité est >= 0.5 :
+#       prédiction = Oui
+#
+# Sinon :
+#       prédiction = Non
+#
+# ============================================================
+probabilites <- predict(
+  modele,
+  newdata = test,
+  type = "response"
+)
+
+predictions <- ifelse(
+  probabilites >= 0.5,
+  "Oui",
+  "Non"
+)
+
+predictions <- factor(
+  predictions,
+  levels = c("Non", "Oui")
+)
+
+head(probabilites)
+head(predictions)
+
+# Prediction de Random forest 
+predictions_rf <- predict(
+  modele_rf,
+  newdata = test
+)
+
+predictions_rf <- factor(
+  predictions_rf,
+  levels = c("Non", "Oui")
+)
+
+# accuracy de  regretion et forest 
+
+accuracy_logistique <- mean(
+  predictions == test$Survived
+)
+
+accuracy_logistique
+
+accuracy_rf <- mean(
+  predictions_rf == test$Survived
+)
+
+accuracy_rf
+```
+```{r}
+table(
+  Prediction = predictions,
+  Réalité = test$Survived
+)
+mean(predictions == test$Survived)
+#le pourcentage de bonnes prédictions (77.7%)
+```
+```{r}
+#examiner l'effet de Pclass dans la prediction 
+titanic %>%
+  group_by(Pclass) %>%
+  summarise(
+    nombre = n(),
+    survivants = sum(Survived == 1),
+    taux_survie = mean(Survived == 1)
+  )
+```
+
+
+```{r}
+#proportion de survivants dans chaque classe
+ggplot(titanic, aes(x = Pclass, fill = factor(Survived))) +
+  geom_bar(position = "fill") +
+  labs(
+    x = "Classe",
+    y = "Proportion",
+    fill = "Survie"
+  ) +
+  theme_minimal()
+```
+```{r}
+# model sans la classe
+modele_sans_classe <- glm(
+  Survived ~ Sex + Age + SibSp + Parch,
+  data = train,
+  family = binomial
+)
+probabilites_sans_classe <- predict(
+  modele_sans_classe,
+  newdata = test,
+  type = "response"
+)
+
+predictions_sans_classe <- ifelse(
+  probabilites_sans_classe >= 0.5,
+  "Oui",
+  "Non"
+)
+
+predictions_sans_classe <- factor(
+  predictions_sans_classe,
+  levels = c("Non", "Oui")
+)
+```
+
+
+```{r}
+# Comparer les deux modèles
+mean(predictions == test$Survived)
+mean(predictions_sans_classe == test$Survived)
+table(
+  Prediction = predictions_sans_classe,
+  Réalité = test$Survived
+)
+```
+# remarque : Dans notre expérience, retirer Pclass modifie très peu les performances du modèle sur l'échantillon de test.
+
+
+```{r}
+resultats_classe <- test %>%
+  mutate(prediction = predictions) %>%
+  group_by(Pclass) %>%
+  summarise(
+    nombre = n(),
+    accuracy = mean(prediction == Survived)
+  )
+
+resultats_classe
+```
+
+
+```{r}
+test_resultats <- test %>%
+  mutate(
+    prediction_logistique = predictions,
+    prediction_rf = predictions_rf
+  )
+head(test_resultats)
+#voir les erreurs de la régression logistique
+test_resultats %>%
+  group_by(Pclass, Survived,prediction_logistique) %>%
+  summarise(
+    nombre = n(),
+    .groups = "drop"
+  )
+#Pour chaque classe, combien de personnes ont réellement survécu/mouru et qu'a prédit la régression logistique ?
+
+#voir erreur forest 
+test_resultats %>%
+  group_by(Pclass, Survived, prediction_rf) %>%
+  summarise(
+    nombre = n(),
+    .groups = "drop"
+  )
+```
+#comment le modèle se trompe.
+
+Par exemple, en 3ème classe, le modèle a :
+
+prédit "survie" pour 12 personnes qui sont en réalité mortes.
+
+Et il a aussi :
+
+prédit "mort" pour 10 personnes qui ont réellement survécu.
+
+Donc deux modèles peuvent avoir une accuracy similaire mais faire des erreurs très différentes.
+##
+
+
+```{r}
+# Comparer les deux modèles
+accuracy_logistique <- mean(
+  test_resultats$prediction_logistique == test_resultats$Survived
+)
+
+accuracy_rf <- mean(
+  test_resultats$prediction_rf == test_resultats$Survived
+)
+
+accuracy_logistique
+accuracy_rf
+```
+
+
+
+```{r}
+#Taux de faux positifs et faux négatifs par classe ( regretion)
+# ============================================================
+# 6. CALCUL DES ERREURS DE LA RÉGRESSION LOGISTIQUE
+# ============================================================
+#
+# On calcule les erreurs séparément pour chaque classe :
+#
+#   Faux positif :
+#   le modèle prédit "Oui" alors que la personne
+#   n'a pas survécu.
+#
+#   Faux négatif :
+#   le modèle prédit "Non" alors que la personne
+#   a survécu.
+#
+# ============================================================
+resultats_erreurs_logistique <- test_resultats %>%
+  group_by(Pclass) %>%
+  summarise(
+    faux_positifs = sum(
+      Survived == "Non" &
+      prediction_logistique == "Oui"
+    ),
+    
+    vrais_negatifs = sum(
+      Survived == "Non"
+    ),
+    
+    faux_negatifs = sum(
+      Survived == "Oui" &
+      prediction_logistique == "Non"
+    ),
+    
+    vrais_positifs = sum(
+      Survived == "Oui"
+    ),
+    
+    taux_faux_positifs = faux_positifs / vrais_negatifs,
+    taux_faux_negatifs = faux_negatifs / vrais_positifs
+  )
+
+resultats_erreurs_logistique
+```
+
+Commentaire
+
+1ère classe
+
+4 personnes décédées ont été prédites comme survivantes → faux positifs.
+7 survivants ont été prédits comme décédés → faux négatifs.
+Le taux de faux positifs est de 33,3 %.
+Le taux de faux négatifs est de 26,9 %.
+
+2ème classe
+
+Très peu de faux positifs : 4,8 %.
+Le taux de faux négatifs est de 27,3 %.
+
+3ème classe
+
+C'est la classe la plus intéressante pour ton analyse :
+12 faux positifs
+10 faux négatifs
+taux de faux négatifs de 47,6 %
+
+👉 Cela signifie que le modèle manque presque une personne survivante sur deux parmi les survivants de 3ème classe dans cet échantillon.
+
+Pour ton TP
+
+Tu peux écrire :
+
+La régression logistique ne présente pas les mêmes performances selon la classe. L'erreur la plus importante concerne les faux négatifs en 3ème classe, avec un taux de 47,6 %. Le modèle prédit donc plus difficilement la survie des passagers de 3ème classe. Cette différence suggère que la classe sociale peut être associée à un biais dans les prédictions.
+
+
+
+```{r}
+#Taux de faux positifs et faux négatifs par classe ( Forest)
+
+resultats_erreurs_rf <- test_resultats %>%
+  group_by(Pclass) %>%
+  summarise(
+    faux_positifs = sum(
+      Survived == "Non" &
+      prediction_rf == "Oui"
+    ),
+    
+    vrais_negatifs = sum(
+      Survived == "Non"
+    ),
+    
+    faux_negatifs = sum(
+      Survived == "Oui" &
+      prediction_rf == "Non"
+    ),
+    
+    vrais_positifs = sum(
+      Survived == "Oui"
+    ),
+    
+    taux_faux_positifs = faux_positifs / vrais_negatifs,
+    taux_faux_negatifs = faux_negatifs / vrais_positifs
+  )
+
+resultats_erreurs_rf
+```
+
+
+
+```{r}
+#Tableau comparatif pour forest et regretion
+comparaison <- data.frame(
+  Modele = c(
+    "Régression logistique",
+    "Random Forest"
+  ),
+  
+  Accuracy = c(
+    accuracy_logistique,
+    accuracy_rf
+  )
+)
+
+comparaison
+```
+Ce qu'on peut conclure
+
+Classe 1 :
+
+Random Forest réduit fortement les faux positifs : 33,3 % → 8,3 %.
+Mais elle augmente légèrement les faux négatifs : 26,9 % → 30,8 %.
+
+Classe 2 :
+
+Random Forest est clairement meilleure pour les faux négatifs : 27,3 % → 13,6 %.
+
+Classe 3 :
+
+Random Forest réduit légèrement les faux positifs : 15,6 % → 11,7 %.
+Mais les deux modèles ont exactement le même taux de faux négatifs : 47,6 %.
+
+Donc, Random Forest améliore globalement les performances, mais elle ne supprime pas le problème observé en 3ème classe.
+
+
+Le modèle Random Forest obtient une meilleure accuracy que la régression logistique. Il atteint 82,12 % de bonnes prédictions contre 77,65 % pour la régression logistique, soit une amélioration d'environ 4,47 points de pourcentage.
+
+Cependant, l'accuracy seule ne suffit pas pour évaluer le modèle. Il faut également analyser les faux positifs et faux négatifs selon la classe des passagers afin de vérifier si les erreurs sont réparties équitablement.
+
+
+```{r}
+#Regrtion : extraire uniquement les taux d'erreurs par classe à partir de ton tableau resultats_erreurs.
+
+resultats_erreurs_logistique %>%
+  select(
+    Pclass,
+    taux_faux_positifs,
+    taux_faux_negatifs
+  )
+# Forest
+resultats_erreurs_rf %>%
+  select(
+    Pclass,
+    taux_faux_positifs,
+    taux_faux_negatifs
+  )
+```
+
+# Autrement dit, dans cet échantillon de test, parmi les personnes de classe 3 qui ont réellement survécu, le modèle en a classé environ 48 % comme "Non".
+
+ une accuracy globale peut masquer des différences de comportement du modèle entre groupes.
+ 
+
+
+#### 1. cellule UI
+```{r}
+ui <- fluidPage(
+
+  theme = bslib::bs_theme(
+    version = 5,
+    bootswatch = "flatly"
+  ),
+
+  # ============================================================
+  # TITRE
+  # ============================================================
+
+  div(
+    style = "
+      text-align:center;
+      padding:30px 20px;
+      margin-bottom:25px;
+    ",
+
+    h1(
+      "🚢 Titanic — Prédiction de survie",
+      style = "
+        font-weight:700;
+        margin-bottom:10px;
+      "
+    ),
+
+    p(
+      "Analyse comparative entre Régression logistique et Random Forest",
+      style = "
+        font-size:18px;
+        color:#666;
+      "
+    )
+  ),
+
+
+  # ============================================================
+  # PROFIL DU PASSAGER
+  # ============================================================
+
+  card(
+    style = "margin-bottom:25px;",
+
+    card_header(
+      "👤 Profil du passager"
+    ),
+
+    div(
+      style = "padding:25px;",
+
+      fluidRow(
+
+        column(
+          6,
+
+          selectInput(
+            "pclass",
+            "🎫 Classe du passager",
+            choices = c(
+              "🥇 1ère classe" = 1,
+              "🥈 2ème classe" = 2,
+              "🥉 3ème classe" = 3
+            ),
+            selected = 3
+          )
+        ),
+
+        column(
+          6,
+
+          radioButtons(
+            "sex",
+            "👤 Sexe",
+            choices = c(
+              "👩 Femme" = "female",
+              "👨 Homme" = "male"
+            ),
+            selected = "female",
+            inline = TRUE
+          )
+        )
+      ),
+
+      fluidRow(
+
+        column(
+          4,
+
+          sliderInput(
+            "age",
+            "🎂 Âge",
+            min = 0,
+            max = 80,
+            value = 30,
+            step = 1
+          )
+        ),
+
+        column(
+          4,
+
+          numericInput(
+            "sibsp",
+            "👨‍👩‍👧 Frères / sœurs / conjoint",
+            value = 0,
+            min = 0,
+            max = 8
+          )
+        ),
+
+        column(
+          4,
+
+          numericInput(
+            "parch",
+            "👨‍👩‍👧 Parents / enfants",
+            value = 0,
+            min = 0,
+            max = 6
+          )
+        )
+      )
+    )
+  ),
+
+
+  # ============================================================
+  # ONGLETS
+  # ============================================================
+
+  tabsetPanel(
+
+    id = "onglets",
+
+
+    # ==========================================================
+    # ONGLET 1 — PRÉDICTION
+    # ==========================================================
+
+    tabPanel(
+
+      "🎯 Prédiction",
+
+      br(),
+
+      h3(
+        "Prédiction pour le passager sélectionné"
+      ),
+
+      p(
+        "Les deux modèles analysent exactement le même profil."
+      ),
+
+      br(),
+
+      fluidRow(
+
+        # ------------------------------------------------------
+        # LOGISTIQUE
+        # ------------------------------------------------------
+
+        column(
+          6,
+
+          card(
+
+            card_header(
+              "📊 Régression logistique"
+            ),
+
+            div(
+              style = "
+                text-align:center;
+                padding:30px;
+              ",
+
+              h4("Prédiction"),
+
+              h2(
+                textOutput(
+                  "prediction_logistique"
+                ),
+                style = "
+                  font-size:30px;
+                  font-weight:bold;
+                  margin:20px;
+                "
+              ),
+
+              hr(),
+
+              h4("Probabilité de survie"),
+
+              h2(
+                textOutput(
+                  "probabilite_logistique"
+                ),
+                style = "
+                  font-size:32px;
+                  margin-top:20px;
+                "
+              )
+            )
+          )
+        ),
+
+
+        # ------------------------------------------------------
+        # RANDOM FOREST
+        # ------------------------------------------------------
+
+        column(
+          6,
+
+          card(
+
+            card_header(
+              "🌲 Random Forest"
+            ),
+
+            div(
+              style = "
+                text-align:center;
+                padding:30px;
+              ",
+
+              h4("Prédiction"),
+
+              h2(
+                textOutput(
+                  "prediction_rf"
+                ),
+                style = "
+                  font-size:30px;
+                  font-weight:bold;
+                  margin:20px;
+                "
+              ),
+
+              hr(),
+
+              h4("Probabilité de survie"),
+
+              h2(
+                textOutput(
+                  "probabilite_rf"
+                ),
+                style = "
+                  font-size:32px;
+                  margin-top:20px;
+                "
+              )
+            )
+          )
+        )
+      ),
+
+      br(),
+
+      card(
+
+        card_header(
+          "💡 Interprétation du profil"
+        ),
+
+        div(
+          style = "
+            padding:25px;
+            font-size:17px;
+            line-height:1.7;
+          ",
+
+          textOutput(
+            "interpretation_profil"
+          )
+        )
+      )
+    ),
+
+
+    # ==========================================================
+    # ONGLET 2 — EFFET DE LA CLASSE
+    # ==========================================================
+
+    tabPanel(
+
+      "⚖️ Effet de la classe",
+
+      br(),
+
+      h3(
+        "Que se passe-t-il si seule la classe change ?"
+      ),
+
+      p(
+        "Le sexe, l'âge et la composition familiale restent identiques."
+      ),
+
+      plotOutput(
+        "comparaison_classes",
+        height = "500px"
+      ),
+
+      br(),
+
+      card(
+
+        card_header(
+          "📌 Interprétation"
+        ),
+
+        div(
+          style = "
+            padding:25px;
+            font-size:17px;
+          ",
+
+          textOutput(
+            "interpretation_classe"
+          )
+        )
+      )
+    ),
+
+
+    # ==========================================================
+    # ONGLET 3 — COMPARAISON DES MODÈLES
+    # ==========================================================
+
+    tabPanel(
+
+      "🌲 Comparaison des modèles",
+
+      br(),
+
+      h3(
+        "Les deux modèles donnent-ils la même réponse ?"
+      ),
+
+      plotOutput(
+        "comparaison_modeles",
+        height = "500px"
+      ),
+
+      br(),
+
+      textOutput(
+        "interpretation_modeles"
+      )
+    ),
+
+
+    # ==========================================================
+    # ONGLET 4 — PERFORMANCE
+    # ==========================================================
+
+    tabPanel(
+
+      "📊 Performance",
+
+      br(),
+
+      h3(
+        "Performance globale sur le jeu de test"
+      ),
+
+      p(
+        "Ces résultats évaluent les modèles sur l'ensemble du jeu de test."
+      ),
+
+      plotOutput(
+        "graph_accuracy",
+        height = "500px"
+      ),
+
+      br(),
+
+      tableOutput(
+        "table_performance"
+      )
+    ),
+
+
+    # ==========================================================
+    # ONGLET 5 — BIAIS ET ERREURS
+    # ==========================================================
+
+    tabPanel(
+
+      "⚠️ Biais et erreurs",
+
+      br(),
+
+      h3(
+        "Erreurs selon la classe du passager"
+      ),
+
+      p(
+        "Cette analyse permet d'identifier les groupes pour lesquels les modèles font le plus d'erreurs."
+      ),
+
+      plotOutput(
+        "graph_erreurs",
+        height = "650px"
+      ),
+
+      br(),
+
+      card(
+
+        card_header(
+          "🔎 Interprétation"
+        ),
+
+        div(
+          style = "
+            padding:25px;
+            font-size:17px;
+            line-height:1.7;
+          ",
+
+          textOutput(
+            "interpretation_biais"
+          )
+        )
+      )
+    )
+  )
+)
+
+```
+
+
+#### 2. cellule SERVER
+
+
+
+```{r}
+server <- function(input, output, session) {
+
+
+  # ============================================================
+  # PROFIL DU PASSAGER
+  # ============================================================
+
+  passager <- reactive({
+
+    data.frame(
+
+      Pclass = factor(
+        input$pclass,
+        levels = levels(train$Pclass)
+      ),
+
+      Sex = factor(
+        input$sex,
+        levels = levels(train$Sex)
+      ),
+
+      Age = input$age,
+
+      SibSp = input$sibsp,
+
+      Parch = input$parch
+    )
+  })
+
+
+  # ============================================================
+  # PROBABILITÉS
+  # ============================================================
+
+  probabilite_logistique <- reactive({
+
+    predict(
+      modele,
+      newdata = passager(),
+      type = "response"
+    )
+  })
+
+
+  probabilite_rf <- reactive({
+
+    predict(
+      modele_rf,
+      newdata = passager(),
+      type = "prob"
+    )[, "Oui"]
+  })
+
+
+  # ============================================================
+  # PRÉDICTION LOGISTIQUE
+  # ============================================================
+
+  output$prediction_logistique <- renderText({
+
+    p <- probabilite_logistique()
+
+    if (p >= 0.5) {
+
+      "🟢 SURVIE : OUI"
+
+    } else {
+
+      "🔴 SURVIE : NON"
+    }
+  })
+
+
+  output$probabilite_logistique <- renderText({
+
+    paste0(
+      round(
+        probabilite_logistique() * 100,
+        1
+      ),
+      " %"
+    )
+  })
+
+
+  # ============================================================
+  # PRÉDICTION RANDOM FOREST
+  # ============================================================
+
+  output$prediction_rf <- renderText({
+
+    p <- probabilite_rf()
+
+    if (p >= 0.5) {
+
+      "🟢 SURVIE : OUI"
+
+    } else {
+
+      "🔴 SURVIE : NON"
+    }
+  })
+
+
+  output$probabilite_rf <- renderText({
+
+    paste0(
+      round(
+        probabilite_rf() * 100,
+        1
+      ),
+      " %"
+    )
+  })
+
+
+  # ============================================================
+  # INTERPRÉTATION DU PROFIL
+  # ============================================================
+
+  output$interpretation_profil <- renderText({
+
+    p_log <- probabilite_logistique()
+
+    p_rf <- probabilite_rf()
+
+    difference <- abs(
+      p_log - p_rf
+    ) * 100
+
+
+    if (difference < 5) {
+
+      paste0(
+        "Les deux modèles donnent des estimations très proches ",
+        "(écart de ",
+        round(difference, 1),
+        " points)."
+      )
+
+    } else {
+
+      modele_plus_eleve <- ifelse(
+        p_rf > p_log,
+        "Random Forest",
+        "régression logistique"
+      )
+
+      paste0(
+        "Les deux modèles donnent des estimations différentes. ",
+        modele_plus_eleve,
+        " estime une probabilité de survie plus élevée, ",
+        "avec un écart de ",
+        round(difference, 1),
+        " points."
+      )
+    }
+  })
+
+
+  # ============================================================
+  # COMPARAISON DES CLASSES
+  # ============================================================
+
+  probas_par_classe <- reactive({
+
+    classes <- c(1, 2, 3)
+
+    sapply(
+      classes,
+
+      function(classe) {
+
+        nouveau_passager <- data.frame(
+
+          Pclass = factor(
+            classe,
+            levels = levels(train$Pclass)
+          ),
+
+          Sex = factor(
+            input$sex,
+            levels = levels(train$Sex)
+          ),
+
+          Age = input$age,
+
+          SibSp = input$sibsp,
+
+          Parch = input$parch
+        )
+
+
+        predict(
+          modele_rf,
+          newdata = nouveau_passager,
+          type = "prob"
+        )[, "Oui"]
+      }
+    )
+  })
+
+
+  output$comparaison_classes <- renderPlot({
+
+    df <- data.frame(
+
+      Classe = factor(
+        c(1, 2, 3)
+      ),
+
+      Probabilite = probas_par_classe()
+    )
+
+
+    ggplot(
+      df,
+      aes(
+        x = Classe,
+        y = Probabilite,
+        fill = Classe
+      )
+    ) +
+
+      geom_col(
+        width = 0.6
+      ) +
+
+      geom_text(
+        aes(
+          label = paste0(
+            round(
+              Probabilite * 100,
+              1
+            ),
+            " %"
+          )
+        ),
+        vjust = -0.4,
+        size = 5
+      ) +
+
+      scale_y_continuous(
+        limits = c(0, 1),
+        labels = function(x) {
+          paste0(
+            x * 100,
+            " %"
+          )
+        }
+      ) +
+
+      labs(
+        title = "Même profil, classe différente",
+        x = "Classe",
+        y = "Probabilité de survie"
+      ) +
+
+      theme_minimal(
+        base_size = 16
+      ) +
+
+      theme(
+        legend.position = "none"
+      )
+  })
+
+
+  output$interpretation_classe <- renderText({
+
+    probas <- probas_par_classe()
+
+    ecart <- (
+      max(probas) -
+      min(probas)
+    ) * 100
+
+
+    classe_max <- which.max(probas)
+
+    classe_min <- which.min(probas)
+
+
+    paste0(
+      "Pour ce profil, la probabilité de survie varie de ",
+      round(
+        min(probas) * 100,
+        1
+      ),
+      " % en classe ",
+      classe_min,
+      " à ",
+      round(
+        max(probas) * 100,
+        1
+      ),
+      " % en classe ",
+      classe_max,
+      ". L'écart est de ",
+      round(
+        ecart,
+        1
+      ),
+      " points de pourcentage."
+    )
+  })
+
+
+  # ============================================================
+  # COMPARAISON DES DEUX MODÈLES
+  # ============================================================
+
+  output$comparaison_modeles <- renderPlot({
+
+    df <- data.frame(
+
+      Modele = c(
+        "Régression logistique",
+        "Random Forest"
+      ),
+
+      Probabilite = c(
+        probabilite_logistique(),
+        probabilite_rf()
+      )
+    )
+
+
+    ggplot(
+      df,
+      aes(
+        x = Modele,
+        y = Probabilite,
+        fill = Modele
+      )
+    ) +
+
+      geom_col(
+        width = 0.55
+      ) +
+
+      geom_text(
+        aes(
+          label = paste0(
+            round(
+              Probabilite * 100,
+              1
+            ),
+            " %"
+          )
+        ),
+        vjust = -0.5,
+        size = 6
+      ) +
+
+      scale_y_continuous(
+        limits = c(0, 1),
+        labels = function(x) {
+          paste0(
+            x * 100,
+            " %"
+          )
+        }
+      ) +
+
+      labs(
+        x = "Modèle",
+        y = "Probabilité de survie"
+      ) +
+
+      theme_minimal(
+        base_size = 16
+      ) +
+
+      theme(
+        legend.position = "none"
+      )
+  })
+
+
+  output$interpretation_modeles <- renderText({
+
+    p1 <- probabilite_logistique()
+
+    p2 <- probabilite_rf()
+
+    difference <- abs(
+      p1 - p2
+    ) * 100
+
+
+    if (difference < 5) {
+
+      paste0(
+        "Les deux modèles sont très proches pour ce passager : ",
+        "écart de ",
+        round(
+          difference,
+          1
+        ),
+        " points."
+      )
+
+    } else {
+
+      paste0(
+        "Les modèles présentent un écart de ",
+        round(
+          difference,
+          1
+        ),
+        " points de probabilité de survie."
+      )
+    }
+  })
+
+
+  # ============================================================
+  # PERFORMANCE GLOBALE
+  # ============================================================
+
+  output$graph_accuracy <- renderPlot({
+
+    comparaison <- data.frame(
+
+      Modele = c(
+        "Régression logistique",
+        "Random Forest"
+      ),
+
+      Accuracy = c(
+        accuracy_logistique,
+        accuracy_rf
+      )
+    )
+
+
+    ggplot(
+      comparaison,
+      aes(
+        x = Modele,
+        y = Accuracy,
+        fill = Modele
+      )
+    ) +
+
+      geom_col(
+        width = 0.55
+      ) +
+
+      geom_text(
+        aes(
+          label = paste0(
+            round(
+              Accuracy * 100,
+              2
+            ),
+            " %"
+          )
+        ),
+        vjust = -0.5,
+        size = 6
+      ) +
+
+      scale_y_continuous(
+        limits = c(0, 1),
+        labels = function(x) {
+          paste0(
+            x * 100,
+            " %"
+          )
+        }
+      ) +
+
+      labs(
+        x = "Modèle",
+        y = "Accuracy"
+      ) +
+
+      theme_minimal(
+        base_size = 16
+      ) +
+
+      theme(
+        legend.position = "none"
+      )
+  })
+
+
+  output$table_performance <- renderTable({
+
+    data.frame(
+
+      Modèle = c(
+        "Régression logistique",
+        "Random Forest"
+      ),
+
+      Accuracy = paste0(
+        round(
+          c(
+            accuracy_logistique,
+            accuracy_rf
+          ) * 100,
+          2
+        ),
+        " %"
+      )
+    )
+  })
+
+
+  # ============================================================
+  # ANALYSE DES ERREURS
+  # ============================================================
+
+  output$graph_erreurs <- renderPlot({
+
+    erreurs_logistique <-
+      resultats_erreurs_logistique %>%
+
+      select(
+        Pclass,
+        taux_faux_positifs,
+        taux_faux_negatifs
+      ) %>%
+
+      mutate(
+        Modele =
+          "Régression logistique"
+      )
+
+
+    erreurs_rf <-
+      resultats_erreurs_rf %>%
+
+      select(
+        Pclass,
+        taux_faux_positifs,
+        taux_faux_negatifs
+      ) %>%
+
+      mutate(
+        Modele =
+          "Random Forest"
+      )
+
+
+    erreurs <-
+      bind_rows(
+        erreurs_logistique,
+        erreurs_rf
+      )
+
+
+    erreurs_long <-
+      erreurs %>%
+
+      pivot_longer(
+
+        cols = c(
+          taux_faux_positifs,
+          taux_faux_negatifs
+        ),
+
+        names_to =
+          "Type_erreur",
+
+        values_to =
+          "Taux"
+      ) %>%
+
+      mutate(
+
+        Type_erreur =
+          recode(
+
+            Type_erreur,
+
+            taux_faux_positifs =
+              "Faux positifs",
+
+            taux_faux_negatifs =
+              "Faux négatifs"
+          ),
+
+        Pclass =
+          paste(
+            "Classe",
+            Pclass
+          )
+      )
+
+
+    ggplot(
+
+      erreurs_long,
+
+      aes(
+        x = Pclass,
+        y = Taux,
+        fill = Type_erreur
+      )
+
+    ) +
+
+      geom_col(
+        position =
+          position_dodge(
+            width = 0.8
+          ),
+
+        width = 0.7
+      ) +
+
+      geom_text(
+
+        aes(
+          label =
+            paste0(
+              round(
+                Taux * 100,
+                1
+              ),
+              " %"
+            )
+        ),
+
+        position =
+          position_dodge(
+            width = 0.8
+          ),
+
+        vjust = -0.4,
+
+        size = 4
+      ) +
+
+      facet_wrap(
+        ~Modele
+      ) +
+
+      scale_y_continuous(
+
+        limits =
+          c(0, 0.6),
+
+        labels =
+          function(x) {
+            paste0(
+              x * 100,
+              " %"
+            )
+          }
+      ) +
+
+      labs(
+        x = "Classe",
+        y = "Taux d'erreur",
+        fill = "Type d'erreur"
+      ) +
+
+      theme_minimal(
+        base_size = 16
+      ) +
+
+      theme(
+        legend.position =
+          "bottom"
+      )
+  })
+
+
+  # ============================================================
+  # INTERPRÉTATION DU BIAIS
+  # ============================================================
+
+  output$interpretation_biais <- renderText({
+
+    fn_log <-
+      resultats_erreurs_logistique$taux_faux_negatifs
+
+    fn_rf <-
+      resultats_erreurs_rf$taux_faux_negatifs
+
+
+    classe_log <-
+      which.max(fn_log)
+
+    classe_rf <-
+      which.max(fn_rf)
+
+
+    paste0(
+      "La classe 3 présente le taux de faux négatifs le plus élevé ",
+      "dans les résultats obtenus. Cela montre que l'accuracy globale ",
+      "ne suffit pas à évaluer équitablement un modèle : ses performances ",
+      "peuvent varier selon le groupe de passagers."
+    )
+  })
+
+}
+```
+
+
+```{r}
+shinyApp(
+  ui = ui,
+  server = server
+)
+```
+
